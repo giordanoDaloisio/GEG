@@ -1,8 +1,0 @@
-dataset,label,positive_label,k,unpriv_group1,unpriv_group2,unpriv_group3,unpriv_group4
-cmc,contr_use,2,3,wife_religion:1,wife_work:1,wife_edu:0:33,hus_occ:0:3
-crime,ViolentCrimesClass,100,41,black_people:1,hisp_people:1,MedRent:1:0.1,racePctAsian:0:1.1
-drug,y,0,22,race:1,gender:0,age:1:0,country:0:0.1
-law,gpa,2,103,race:1,gender:1,age:0:61,fam_inc:0:3
-obesity,y,0,10,Gender:1,Age:1,MTRANS:1:3,family_history_with_overweight:0:0.3
-park,score_cut,0,34,age:1,sex:0,PPE:0:0.14,Shimmer:1:0.02
-wine,quality,6,76,alcohol:0,type:1,density:0:1.1,pH:1:3.2

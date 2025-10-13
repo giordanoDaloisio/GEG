@@ -245,3 +245,173 @@ class GeneralEqualizedOdds1(GeneralUtilityParity1):
         event = _merge_event_and_control_columns(base_event, cf_train)
 
         super().load_data(X, y_train, event=event, sensitive_features=sf_train)
+
+
+# -----------------------------------------
+# Combined Fairness Constraint Class (DP + EO)
+# -----------------------------------------
+class CombinedParityGeneral1(ClassificationMoment):
+    """Combined demographic parity and equalized odds constraints for classification."""
+
+    short_name = "CombinedParityGeneral1"
+
+    def __init__(
+        self,
+        *,
+        y_p,
+        use_dp=True,
+        use_eo=True,
+        dp_bound=None,
+        eo_bound=None,
+        dp_ratio_bound=None,
+        eo_ratio_bound=None,
+        ratio_bound_slack=0.0,
+    ):
+        super().__init__()
+        if not use_dp and not use_eo:
+            raise ValueError("At least one of use_dp or use_eo must be True")
+        if (dp_bound is not None and dp_ratio_bound is not None) or (eo_bound is not None and eo_ratio_bound is not None):
+            raise ValueError(_MESSAGE_INVALID_BOUNDS)
+
+        self.y_p = y_p
+        self.use_dp = use_dp
+        self.use_eo = use_eo
+        self.dp_bound = dp_bound if dp_bound is not None else _DEFAULT_DIFFERENCE_BOUND
+        self.eo_bound = eo_bound if eo_bound is not None else _DEFAULT_DIFFERENCE_BOUND
+        self.dp_ratio_bound = dp_ratio_bound
+        self.eo_ratio_bound = eo_ratio_bound
+        self.ratio_bound_slack = ratio_bound_slack
+
+    def default_objective(self):
+        """Return the default objective (error rate)."""
+        return GeneralErrorRate1(y_p=self.y_p)
+
+    def load_data(self, X, y, *, sensitive_features, control_features=None, utilities=None):
+        """Load the specified data into the object."""
+        _, y_train, sf_train, cf_train = _validate_and_reformat_input(
+            X, y,
+            sensitive_features=sensitive_features,
+            control_features=control_features
+        )
+        self.tags = pd.DataFrame({_LABEL: y_train, _GROUP_ID: sf_train})
+        self.X = X
+        self._y = y_train
+        self._total_samples = len(y_train)
+
+        # Build utilities if not provided
+        if utilities is None:
+            utilities = build_pred_based_utilities(y_train, self.y_p)
+        self.utilities = utilities
+        self.classes_ = sorted(np.unique(y_train))
+        self.y_p_index = self.classes_.index(self.y_p)
+
+        # Initialize events and bounds
+        events = []
+        bounds = []
+        ratios = {}
+
+        if self.use_dp:
+            self.tags["dp_event"] = pd.Series(_ALL, index=y_train.index)
+            events.append("dp_event")
+            bounds.append(self.dp_bound)
+            ratios["dp_event"] = self.dp_ratio_bound if self.dp_ratio_bound is not None else 1.0
+
+        if self.use_eo:
+            self.tags["eo_event"] = y_train.apply(lambda v: f"{_LABEL}={v}")
+            events.append("eo_event")
+            bounds.append(self.eo_bound)
+            ratios["eo_event"] = self.eo_ratio_bound if self.eo_ratio_bound is not None else 1.0
+
+        # Create index and probability distributions
+        self.index = []
+        bound_vals = []
+        self.prob_event = {}
+        self.prob_group_event = {}
+
+        for ev_col, bound in zip(events, bounds):
+            ev_vals = self.tags[ev_col].unique()
+            self.prob_event[ev_col] = self.tags.groupby(ev_col).size() / self._total_samples
+            self.prob_group_event[ev_col] = self.tags.groupby([ev_col, _GROUP_ID]).size() / self._total_samples
+
+            for ev in ev_vals:
+                for g in self.tags[_GROUP_ID].unique():
+                    self.index.append(("+", ev, g))
+                    self.index.append(("-", ev, g))
+                    bound_vals.append(bound)
+                    bound_vals.append(bound)
+
+        self.index = pd.MultiIndex.from_tuples(self.index, names=[_SIGN, _EVENT, _GROUP_ID])
+        self.bound_ = pd.Series(bound_vals, index=self.index)
+        self.ratios = ratios
+
+    def bound(self):
+        """Return the bound values."""
+        return self.bound_
+
+    def gamma(self, predictor):
+        """Calculate gamma values for the current predictor."""
+        predictions = np.squeeze(predictor(self.X))
+        pred = (predictions == self.y_p).astype(float)
+        self.tags[_PREDICTION] = pred
+
+        gamma_list = []
+        for ev_col in ["dp_event", "eo_event"]:
+            if ev_col not in self.tags.columns:
+                continue
+
+            ratio = self.ratios[ev_col]
+            mean_event = self.tags.groupby(ev_col)[_PREDICTION].mean()
+            mean_group_event = self.tags.groupby([ev_col, _GROUP_ID])[_PREDICTION].mean()
+
+            upper = ratio * mean_group_event - mean_event.reindex(mean_group_event.index.get_level_values(0)).values
+            lower = -mean_group_event + ratio * mean_event.reindex(mean_group_event.index.get_level_values(0)).values
+
+            g = pd.concat([upper, lower], keys=["+", "-"], names=[_SIGN, _EVENT, _GROUP_ID])
+            gamma_list.append(g)
+
+        gamma_final = pd.concat(gamma_list).reindex(self.index).fillna(0)
+        self._gamma_descr = str(gamma_final)
+        return gamma_final
+
+    def project_lambda(self, lambda_vec):
+        """Project lambda values according to constraints."""
+        dp_ratio_1 = (self.dp_ratio_bound is None or self.dp_ratio_bound == 1.0)
+        eo_ratio_1 = (self.eo_ratio_bound is None or self.eo_ratio_bound == 1.0)
+
+        if dp_ratio_1 and eo_ratio_1:
+            lambda_pos = lambda_vec["+"] - lambda_vec["-"]
+            lambda_neg = -lambda_pos
+            lambda_pos[lambda_pos < 0.0] = 0.0
+            lambda_neg[lambda_neg < 0.0] = 0.0
+            return pd.concat([lambda_pos, lambda_neg], keys=["+", "-"], names=[_SIGN, _EVENT, _GROUP_ID])
+        return lambda_vec
+
+    def signed_weights(self, lambda_vec):
+        """Compute signed weights for the classifier."""
+        signed_weights = pd.Series(0.0, index=self.tags.index)
+
+        for ev_col in ["dp_event", "eo_event"]:
+            if ev_col not in self.tags.columns:
+                continue
+
+            ratio = self.ratios[ev_col]
+            prob_e = self.prob_event[ev_col]
+            prob_ge = self.prob_group_event[ev_col]
+
+            lambda_event = (lambda_vec["+"] - ratio * lambda_vec["-"]).groupby(level=_EVENT).sum()
+            lambda_group_event = (ratio * lambda_vec["+"] - lambda_vec["-"])
+
+            for (e, g) in prob_ge.index:
+                adjust = lambda_event[e] / prob_e[e] - lambda_group_event[(e, g)] / prob_ge[(e, g)]
+                mask = (self.tags[ev_col] == e) & (self.tags[_GROUP_ID] == g)
+                signed_weights[mask] += adjust
+
+        utility_diff = self.utilities[:, self.y_p_index]
+        return utility_diff * signed_weights
+
+    def __repr__(self):
+        return (
+            f"CombinedParityGeneral1(y_p={self.y_p}, use_dp={self.use_dp}, use_eo={self.use_eo}, "
+            f"dp_bound={self.dp_bound}, eo_bound={self.eo_bound}, "
+            f"dp_ratio_bound={self.dp_ratio_bound}, eo_ratio_bound={self.eo_ratio_bound})"
+        )

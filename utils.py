@@ -7,8 +7,8 @@ def get_values(dataset: str):
 
     if "adult" in dataset:
         return ("income", 1, {'sex': 1}, {'sex': 0})
-    if "bank" in dataset:
-        return ("loan", 1, {'age': 1}, {'age': 0})
+    if "cmc" in dataset:
+        return ("contr_use", 2, {'wife_religion': 1}, {'wife_religion': 0})
     if "compas" in dataset:
         return ("two_year_recid", 0, {'race': 1}, {'race': 0})
     if "german" in dataset:

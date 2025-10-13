@@ -2,6 +2,9 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
 )
 
 
@@ -163,9 +166,24 @@ class Metrics:
         )
         return fpr_unpriv - fpr_priv
 
-    def accuracy(self, df_pred):
+    def accuracy(self):
         return accuracy_score(
-            df_pred[self.label_name].values, df_pred[self.true_label].values
+            self.data_pred[self.label_name].values, self.data_pred[self.true_label].values
+        )
+    
+    def precision(self):
+        return precision_score(
+            self.data_pred[self.true_label].values, self.data_pred[self.label_name].values, pos_label=self.positive_label, average='macro'
+        )
+    
+    def recall(self):
+        return recall_score(
+            self.data_pred[self.true_label].values, self.data_pred[self.label_name].values, pos_label=self.positive_label, average='macro'
+        )
+    
+    def f1(self):
+        return f1_score(
+            self.data_pred[self.true_label].values, self.data_pred[self.label_name].values, pos_label=self.positive_label, average='macro'
         )
 
 

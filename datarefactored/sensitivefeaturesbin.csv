@@ -1,4 +1,0 @@
-dataset,label,positive_label,k,unpriv_group1,unpriv_group2,unpriv_group3,unpriv_group4
-adult,income,1,200,sex:0,race:0,Bachelors:0,hour<10:0
-compas,two_year_recid,0,29,sex:0,race:0,age:0:50,juv_other_count:0:0.1
-german,credit,1,2,sex:0,age:0,investment_as_income_percentage:0:3,month:0:30
