@@ -86,7 +86,6 @@ def run_experiment_geg(dataset: str, data: pd.DataFrame, constraint_type: str, n
         geg = GeneralizedExponentiatedGradient(
             estimator=LogisticRegression(),
             constraints=constraint,
-            eps=1e-5,
             positive_label=pos_label
         )
 
@@ -127,14 +126,14 @@ if __name__ == "__main__":
     
     # binary_data = ['adult', 'compas.csv', 'german.csv']
 
-    binary_data = ['german.csv']
+    binary_data = ['compas.csv']
 
     for data in os.listdir('data'):
         if data.endswith('.csv'):
             if data in binary_data:
               dataset_name = data[:-4]
               print(f"Processing dataset: {dataset_name}")
-              df = pd.read_csv(os.path.join('data', data))
+              df = pd.read_csv(os.path.join('data', data), index_col=0)
 
               print("Running baseline experiment...")
               baseline_results = run_experiment(dataset_name, df)

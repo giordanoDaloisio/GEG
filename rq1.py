@@ -76,8 +76,8 @@ def run_experiment_geg(dataset: str, data: pd.DataFrame, constraint_type: str, n
                 use_dp=True,
                 use_eo=True,
                 y_p=pos_label,
-                dp_bound=0.005,
-                eo_bound=0.005,
+                dp_bound=0.05,
+                eo_bound=0.05,
                 ratio_bound_slack=1e-7
             )
         else:
@@ -124,7 +124,7 @@ def run_experiment_geg(dataset: str, data: pd.DataFrame, constraint_type: str, n
 
 if __name__ == "__main__":
     
-    multiclass_data = ['cmc', 'crime.csv', 'drug.csv', 'law.csv', 'obesity.csv', 'park.csv', 'wine.csv']
+    multiclass_data = ['cmc.csv']
 
     for data in os.listdir('data'):
         if data.endswith('.csv'):
@@ -138,8 +138,8 @@ if __name__ == "__main__":
               os.makedirs('results_baseline', exist_ok=True)
               baseline_results.to_csv(f'results_baseline/{dataset_name}_baseline_results.csv', index=False)
 
-              for constraint in ['dp', 'eo', 'cp']:
-                  print(f"Running GEG experiment with constraint: {constraint}")
-                  geg_results = run_experiment_geg(dataset_name, df, constraint)
-                  os.makedirs('results_geg', exist_ok=True)
-                  geg_results.to_csv(f'results_geg/{dataset_name}_geg_{constraint}_results.csv', index=False)
+            #   for constraint in ['dp', 'eo', 'cp']:
+            #       print(f"Running GEG experiment with constraint: {constraint}")
+            #       geg_results = run_experiment_geg(dataset_name, df, constraint)
+            #       os.makedirs('results_geg_new', exist_ok=True)
+            #       geg_results.to_csv(f'results_geg_new/{dataset_name}_geg_{constraint}_results.csv', index=False)
