@@ -67,7 +67,13 @@ class GeneralErrorRate1(ClassificationMoment):
         """Return signed weights for binary or multi-class using positive label self.y_p."""
         y = self.tags[_LABEL]
 
+        # For error minimization, we want:
+        # - Positive weight when we correctly predict the positive class (y == y_p and pred == y_p)
+        # - Negative weight when we incorrectly predict the positive class (y != y_p and pred == y_p)
+        # Since we're in the context of training, we use the true labels to compute the sign
         indicator = (y == self.y_p).astype(float)
+        # Flip the sign: +1 for positive class, -1 for negative class
+        # This ensures that minimizing the weighted error actually minimizes error
         weights = 2 * indicator - 1
 
         if lambda_vec is None:

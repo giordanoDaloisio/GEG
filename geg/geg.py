@@ -200,8 +200,12 @@ class _Lagrangian:
 
         if len(unique_classes) == 2:
             # Binary classification
+            # When signed_weight > 0, we want to predict the positive class (y_p)
+            # When signed_weight < 0, we want to predict the negative class (not y_p)
+            pos_class = self.constraints.y_p
+            neg_class = unique_classes[0] if unique_classes[1] == pos_class else unique_classes[1]
             redY = pd.Series(
-                np.where(signed_weight_series > 0, unique_classes[1], unique_classes[0]),
+                np.where(signed_weight_series > 0, pos_class, neg_class),
                 index=signed_y.index
             )
         else:
@@ -417,35 +421,48 @@ class GeneralizedExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
             for i, c in enumerate(all_classes):
                 class_probs[:, i] += (pred == c).astype(float) * self.weights_[t]
 
-        return class_probs
+        return class_probs, all_classes
 
     def predict(self, X, random_state=None):
         check_is_fitted(self)
         random_state = check_random_state(random_state)
-        probs = self._pmf_predict(X)
+        probs, all_classes = self._pmf_predict(X)
+
+        # Handle case where positive label is not predicted by any classifier
+        if self.positive_label not in all_classes:
+            # Add the positive label to all_classes and expand probability matrix
+            all_classes = np.append(all_classes, self.positive_label)
+            all_classes = np.sort(all_classes)
+            
+            # Create new probability matrix with zero probabilities for the missing class
+            new_probs = np.zeros((len(X), len(all_classes)))
+            for i, cls in enumerate(all_classes):
+                if cls != self.positive_label:
+                    # Find original index of this class
+                    orig_idx = np.where(all_classes[all_classes != self.positive_label] == cls)[0][0]
+                    new_probs[:, i] = probs[:, orig_idx]
+                # positive_label gets zero probability (already initialized)
+            
+            probs = new_probs
 
         # Find the index of the positive label
-        all_classes = np.unique([self._hs[t](X) for t in self._hs.index])
-        positive_label_idx = np.where(all_classes == self.positive_label)[0]
-        if len(positive_label_idx) == 0:
-            raise ValueError(f"Positive label {self.positive_label} not found in predicted classes")
-        positive_label_idx = positive_label_idx[0]
+        positive_label_idx = np.where(all_classes == self.positive_label)[0][0]
 
         predictions = []
         for i in range(len(X)):
-            r = random_state.rand()
-            if probs[i, positive_label_idx] >= r:
-                predictions.append(self.positive_label)
+            # For binary classification, use argmax to get the most likely class
+            if len(all_classes) == 2:
+                predictions.append(all_classes[np.argmax(probs[i])])
             else:
-                # For other classes, sample according to remaining probability
-                mask = np.ones(len(all_classes), dtype=bool)
-                mask[positive_label_idx] = False
-                other_probs = probs[i, mask]
-                other_classes = all_classes[mask]
-                if other_probs.sum() > 0:
-                    other_probs = other_probs / other_probs.sum()
-                    predictions.append(random_state.choice(other_classes, p=other_probs))
+                # For multi-class, use probabilistic sampling
+                r = random_state.rand()
+                cumulative_prob = 0
+                for j, cls in enumerate(all_classes):
+                    cumulative_prob += probs[i, j]
+                    if r <= cumulative_prob:
+                        predictions.append(cls)
+                        break
                 else:
-                    # If no probability left for other classes, default to positive label
-                    predictions.append(self.positive_label)
+                    # Fallback to most likely class
+                    predictions.append(all_classes[np.argmax(probs[i])])
         return np.array(predictions)
