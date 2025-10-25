@@ -3,7 +3,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import KFold
 from geg.geg import GeneralizedExponentiatedGradient
 from geg.constraints import GeneralDemographicParity1, GeneralEqualizedOdds1, CombinedParityGeneral1
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
@@ -32,6 +32,8 @@ def run_experiment(dataset: str, data: pd.DataFrame, model_name, n_splits=10):
             model = SVC(class_weight='balanced')
         elif model_name == 'mlp':
             model = MLPClassifier()
+        elif model_name == 'xgb':
+            model = GradientBoostingClassifier()
         else:
             raise ValueError("Invalid model type. Choose from 'rf', 'svm', or 'mlp'.")
 
@@ -108,6 +110,8 @@ def run_experiment_geg(dataset: str, data: pd.DataFrame, constraint_type: str, m
             estimator = SVC(class_weight='balanced', probability=True)
         elif model_name == 'mlp':
             estimator = MLPClassifier()
+        elif model_name == 'xgb':
+            estimator = GradientBoostingClassifier()
         else:
             raise ValueError("Invalid model type. Choose from 'rf', 'svm', or 'mlp'.")
         
@@ -165,7 +169,7 @@ if __name__ == "__main__":
               print(f"Processing dataset: {dataset_name}")
               df = pd.read_csv(os.path.join('data', data))
 
-              for model in ['rf']:
+              for model in ['xgb']:
                   print(f"Running experiment with model: {model}")
                   model_results = run_experiment(dataset_name, df, model)
                   os.makedirs('results_models', exist_ok=True)
