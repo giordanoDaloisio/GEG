@@ -160,7 +160,8 @@ def run_experiment_geg(dataset: str, data: pd.DataFrame, constraint_type: str, m
 
 if __name__ == "__main__":
     
-    multiclass_data = ['law.csv', 'obesity.csv', 'park.csv']
+    #multiclass_data = ['law.csv', 'obesity.csv', 'park.csv']
+    multiclass_data = ['cmc.csv', 'crime.csv', 'drug.csv', 'law.csv', 'park.csv', 'wine.csv']
 
     for data in os.listdir('data'):
         if data.endswith('.csv'):
