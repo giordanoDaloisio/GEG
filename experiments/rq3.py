@@ -117,19 +117,19 @@ def run_experiment_demv(dataset: str, data: pd.DataFrame, n_splits=10):
 
 if __name__ == "__main__":
     
-    # multiclass_data = ['cmc.csv', 'crime.csv', 'drug.csv', 'law.csv', 'obesity.csv', 'park.csv', 'wine.csv']
+    multiclass_data = ['cmc.csv', 'crime.csv', 'drug.csv', 'law.csv', 'obesity.csv', 'park.csv', 'wine.csv']
 
-    # for data in os.listdir('data'):
-    #     if data.endswith('.csv'):
-    #         if data in multiclass_data:   
-    #           dataset_name = data[:-4]
-    #           print(f"Processing dataset: {dataset_name}")
-    #           df = pd.read_csv(os.path.join('data', data))
+    for data in os.listdir('data'):
+        if data.endswith('.csv'):
+            if data in multiclass_data:   
+              dataset_name = data[:-4]
+              print(f"Processing dataset: {dataset_name}")
+              df = pd.read_csv(os.path.join('data', data))
 
-    #           print("Running baseline experiment...")
-    #           baseline_results = run_experiment_demv(dataset_name, df)
-    #           os.makedirs('results_demv', exist_ok=True)
-    #           baseline_results.to_csv(f'results_demv/{dataset_name}_results.csv', index=False)
+              print("Running baseline experiment...")
+              baseline_results = run_experiment_demv(dataset_name, df)
+              os.makedirs('results_demv', exist_ok=True)
+              baseline_results.to_csv(f'results_demv/{dataset_name}_results.csv', index=False)
 
     binary_data = ['adult.csv', 'compas.csv', 'german.csv']
 

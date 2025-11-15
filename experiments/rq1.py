@@ -138,8 +138,8 @@ if __name__ == "__main__":
               os.makedirs('results_baseline', exist_ok=True)
               baseline_results.to_csv(f'results_baseline/{dataset_name}_baseline_results.csv', index=False)
 
-            #   for constraint in ['dp', 'eo', 'cp']:
-            #       print(f"Running GEG experiment with constraint: {constraint}")
-            #       geg_results = run_experiment_geg(dataset_name, df, constraint)
-            #       os.makedirs('results_geg_new', exist_ok=True)
-            #       geg_results.to_csv(f'results_geg_new/{dataset_name}_geg_{constraint}_results.csv', index=False)
+              for constraint in ['dp', 'eo', 'cp']:
+                  print(f"Running GEG experiment with constraint: {constraint}")
+                  geg_results = run_experiment_geg(dataset_name, df, constraint)
+                  os.makedirs('results_geg_new', exist_ok=True)
+                  geg_results.to_csv(f'results_geg_new/{dataset_name}_geg_{constraint}_results.csv', index=False)

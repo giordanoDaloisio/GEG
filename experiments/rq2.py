@@ -124,9 +124,7 @@ def run_experiment_geg(dataset: str, data: pd.DataFrame, constraint_type: str, n
 
 if __name__ == "__main__":
     
-    # binary_data = ['adult', 'compas.csv', 'german.csv']
-
-    binary_data = ['compas.csv']
+    binary_data = ['adult.csv', 'compas.csv', 'german.csv']
 
     for data in os.listdir('data'):
         if data.endswith('.csv'):
