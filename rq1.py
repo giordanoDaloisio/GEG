@@ -124,22 +124,22 @@ def run_experiment_geg(dataset: str, data: pd.DataFrame, constraint_type: str, n
 
 if __name__ == "__main__":
     
-    multiclass_data = ['cmc.csv']
+    multiclass_data = ['cmc.csv', 'crime.csv', 'drug.csv', 'law.csv', 'obesity.csv', 'park.csv', 'wine.csv'] 
 
-    for data in os.listdir('data'):
+    for data in os.listdir('experiments/data'):
         if data.endswith('.csv'):
             if data in multiclass_data:   
               dataset_name = data[:-4]
               print(f"Processing dataset: {dataset_name}")
-              df = pd.read_csv(os.path.join('data', data))
+              df = pd.read_csv(os.path.join('experiments/data', data))
 
               print("Running baseline experiment...")
               baseline_results = run_experiment(dataset_name, df)
-              os.makedirs('results_baseline', exist_ok=True)
-              baseline_results.to_csv(f'results_baseline/{dataset_name}_baseline_results.csv', index=False)
+              os.makedirs('experiments/results_baseline', exist_ok=True)
+              baseline_results.to_csv(f'experiments/results_baseline/{dataset_name}_baseline_results.csv', index=False)
 
               for constraint in ['dp', 'eo', 'cp']:
                   print(f"Running GEG experiment with constraint: {constraint}")
                   geg_results = run_experiment_geg(dataset_name, df, constraint)
-                  os.makedirs('results_geg_new', exist_ok=True)
-                  geg_results.to_csv(f'results_geg_new/{dataset_name}_geg_{constraint}_results.csv', index=False)
+                  os.makedirs('experiments/results_geg_new', exist_ok=True)
+                  geg_results.to_csv(f'experiments/results_geg_new/{dataset_name}_geg_{constraint}_results.csv', index=False)
