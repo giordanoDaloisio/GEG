@@ -15,7 +15,7 @@ from copy import deepcopy
 from multiprocessing import Pool
 from copy import deepcopy
 
-import balancers
+import blackbox.balancers as balancers
 
 
 class CLFRates:

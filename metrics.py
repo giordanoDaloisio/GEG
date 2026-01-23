@@ -32,7 +32,9 @@ class Metrics:
         priv_group_pos = self.data_pred.query("~(" + query + ")&" + label_query)
         return unpriv_group, unpriv_group_pos, priv_group, priv_group_pos
 
-    def compute_probs(self, group_condition, predicted=True):
+    def compute_probs(self, group_condition, predicted=True, positive_label=None): 
+        if positive_label is None:
+            positive_label = self.positive_label
         unpriv_group, unpriv_group_pos, priv_group, priv_group_pos = self.__get_groups(
             group_condition, predicted
         )
@@ -46,19 +48,21 @@ class Metrics:
             priv_group_prob = 0
         return unpriv_group_prob, priv_group_prob
 
-    def __compute_tpr_fpr(self, y_true, y_pred):
+    def __compute_tpr_fpr(self, y_true, y_pred, positive_label=None):
+        if positive_label is None:
+            positive_label = self.positive_label
         TN = 0
         TP = 0
         FP = 0
         FN = 0
         for i in range(len(y_true)):
-            if y_true[i] == self.positive_label:
+            if y_true[i] == positive_label:
                 if y_true[i] == y_pred[i]:
                     TP += 1
                 else:
                     FN += 1
             else:
-                if y_pred[i] == self.positive_label:
+                if y_pred[i] == positive_label:
                     FP += 1
                 else:
                     TN += 1
@@ -72,18 +76,20 @@ class Metrics:
             FPR = FP / (FP + TN)
         return FPR, TPR
 
-    def __compute_tpr_fpr_groups(self, group_condition):
+    def __compute_tpr_fpr_groups(self, group_condition, positive_label=None):
+        if positive_label is None:
+            positive_label = self.positive_label
         query = "&".join([f"`{k}`=={v}" for k, v in group_condition.items()])
         unpriv_group = self.data_pred.query(query)
         priv_group = self.data_pred.drop(unpriv_group.index)
 
         y_true_unpriv = unpriv_group[self.true_label].values.ravel()
-        y_pred_unpric = unpriv_group[self.label_name].values.ravel()
+        y_pred_unpriv = unpriv_group[self.label_name].values.ravel()
         y_true_priv = priv_group[self.true_label].values.ravel()
         y_pred_priv = priv_group[self.label_name].values.ravel()
 
-        fpr_unpriv, tpr_unpriv = self.__compute_tpr_fpr(y_true_unpriv, y_pred_unpric)
-        fpr_priv, tpr_priv = self.__compute_tpr_fpr(y_true_priv, y_pred_priv)
+        fpr_unpriv, tpr_unpriv = self.__compute_tpr_fpr(y_true_unpriv, y_pred_unpriv, positive_label=positive_label)
+        fpr_priv, tpr_priv = self.__compute_tpr_fpr(y_true_priv, y_pred_priv, positive_label=positive_label)
         return fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv
 
     def group_ratio(self, group_condition):
@@ -129,22 +135,45 @@ class Metrics:
     def statistical_parity(self, group_condition: dict):
         unpriv_group_prob, priv_group_prob = self.compute_probs(group_condition)
         return unpriv_group_prob - priv_group_prob
-
-    def disparate_impact(self, group_condition: dict):
-        unpriv_group_prob, priv_group_prob = self.compute_probs(group_condition)
-        return unpriv_group_prob / priv_group_prob if priv_group_prob != 0 else 0
+    
+    def wc_statistical_parity(self, group_condition: dict):
+        stat_pars = []
+        for label in self.data_pred[self.label_name].unique():
+            unpriv_group_prob, priv_group_prob = self.compute_probs(group_condition, predicted=True, positive_label=label)
+            stat_pars.append(unpriv_group_prob - priv_group_prob)
+        return max(stat_pars, key=abs)
 
     def average_odds(self, group_condition: dict):
         fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv = self.__compute_tpr_fpr_groups(
             group_condition
         )
         return ((tpr_unpriv - tpr_priv) + (fpr_unpriv - fpr_priv)) / 2
+    
+    def wc_average_odds(self, group_condition: dict):
+        odds_diffs = []
+        for label in self.data_pred[self.label_name].unique():
+            fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv = self.__compute_tpr_fpr_groups(
+                group_condition, positive_label=label
+            )
+            odds_diff = ((tpr_unpriv - tpr_priv) + (fpr_unpriv - fpr_priv)) / 2
+            odds_diffs.append(odds_diff)
+        return max(odds_diffs, key=abs)
 
     def equal_opportunity(self, group_condition: dict):
         fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv = self.__compute_tpr_fpr_groups(
             group_condition
         )
         return tpr_unpriv - tpr_priv
+
+    def wc_equal_opportunity(self, group_condition: dict):
+        tpr_diffs = []
+        for label in self.data_pred[self.label_name].unique():
+            fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv = self.__compute_tpr_fpr_groups(
+                group_condition, positive_label=label
+            )
+            tpr_diff = tpr_unpriv - tpr_priv
+            tpr_diffs.append(tpr_diff)
+        return max(tpr_diffs, key=abs)
 
     def equal_accuracy(self, group_condition: dict):
         unpriv_group, unpriv_group_pos, priv_group, priv_group_pos = self.__get_groups(

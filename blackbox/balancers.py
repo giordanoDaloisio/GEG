@@ -15,7 +15,7 @@ from itertools import combinations
 from copy import deepcopy
 from sklearn.metrics import roc_curve
 
-import tools
+import blackbox.tools as tools
 
 
 class BinaryBalancer:
