@@ -19,8 +19,10 @@ from absl import app
 import numpy as np
 import sklearn.ensemble
 
-from ml_debiaser import randomized_threshold
-from ml_debiaser import reduce_to_binary
+import randomized_threshold
+import reduce_to_binary
+
+
 
 
 def main(argv):

@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import KFold
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
@@ -9,6 +10,9 @@ from geg.constraints import GeneralDemographicParity1, GeneralEqualizedOdds1, Co
 from metrics import Metrics
 from blackbox.balancers import MulticlassBalancer
 from demv import DEMV
+from ml_debiaser.reduce_to_binary import Reduce2Binary
+
+np.random.seed(42)
 
 def get_values(dataset: str):
 
@@ -269,6 +273,63 @@ def run_experiment_demv(dataset: str, data: pd.DataFrame, n_splits=10):
         
         model = LogisticRegression()
         X_train, y_train = demv.fit_transform(X_train, y_train)
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test.values)
+
+        test_data = X_test.copy()
+        test_data[label] = y_test
+        test_data['pred'] = y_pred
+
+        metrics = Metrics(test_data, 'pred', label, pos_label)
+        accuracy = metrics.accuracy()
+        precision = metrics.precision()
+        recall = metrics.recall()
+        f1_score = metrics.f1()
+        statistical_parity = metrics.statistical_parity(unpriv_group)
+        equal_opportunity = metrics.equal_opportunity(unpriv_group)
+        average_odds = metrics.average_odds(unpriv_group)
+        wc_statistical_parity = metrics.wc_statistical_parity(unpriv_group)
+        wc_equal_opportunity = metrics.wc_equal_opportunity(unpriv_group)
+        wc_average_odds = metrics.wc_average_odds(unpriv_group)
+
+        results.append({
+            'fold': fold,
+            'accuracy': accuracy,
+            'precision': precision,
+            'recall': recall,
+            'f1_score': f1_score,
+            'statistical_parity': statistical_parity,
+            'equal_opportunity': equal_opportunity,
+            'average_odds': average_odds,
+            'wc_statistical_parity': wc_statistical_parity,
+            'wc_equal_opportunity': wc_equal_opportunity,
+            'wc_average_odds': wc_average_odds,
+        })
+
+        fold += 1
+
+    return pd.DataFrame(results)
+
+
+def run_experiment_r2b(dataset: str, data: pd.DataFrame, n_splits=10):
+    label, pos_label, priv_group, unpriv_group = get_values(dataset)
+    X = data.drop(columns=[label])
+    y = data[label]
+
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    fold = 1
+    results = []
+    r2b = Reduce2Binary(num_classes=len(y.unique()))
+    
+    for train_index, test_index in kf.split(X):
+        print(f"Fold {fold}")
+        X_train, X_test = X.iloc[train_index], X.iloc[test_index]
+        y_train, y_test = y.iloc[train_index], y.iloc[test_index]
+        
+        model = LogisticRegression()
+        y_one_hot = pd.get_dummies(y_train).values
+        y_one_hot = r2b.fit(y_one_hot, group_feature=X_train[list(priv_group.keys())[0]].values)
+        y_train = np.argmax(y_one_hot, axis=1)
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test.values)
 
