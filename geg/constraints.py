@@ -673,14 +673,12 @@ class GeneralDemographicParityAll(ClassificationMoment):
         )
         self._bound_series = pd.Series(bound_vals, index=self._index)
 
-        # Utility matrices: one per label
+        # Utility matrices: one per label (1 where true label == cls, else 0)
         n_classes = len(self._classes)
         n_samples = len(y_train)
         self._utilities = np.zeros((n_samples, n_classes), dtype=np.float64)
         for i, cls in enumerate(self._classes):
-            self._utilities[:, i] = (
-                1.0  # weight is uniform; class selection done via y_p_index per label
-            )
+            self._utilities[:, i] = (y_train == cls).astype(float)
 
         self._y_p_indices = {cls: self._classes.index(cls) for cls in self._classes}
         self._group_vals = group_vals
@@ -751,24 +749,23 @@ class GeneralDemographicParityAll(ClassificationMoment):
             prob_e = self._prob_event[col]
             prob_ge = self._prob_group_event[col]
 
-            # Re-map lambda_vec entries using composite event key
             ev_vals = self.tags[col].unique()
-
-            def _composite(ev, g):
-                return (f"{col}|{ev}", g)
-
-            lambda_event_sum = pd.Series(dtype=float)
-            lambda_group_event_adj = pd.Series(dtype=float)
-
             for ev in ev_vals:
-                lp = lambda_vec["+"].get((f"{col}|{ev}",), pd.Series(dtype=float))
-                lm = lambda_vec["-"].get((f"{col}|{ev}",), pd.Series(dtype=float))
-                # sum over groups for event-level term
-                le = float((lp - self.ratio * lm).sum()) / float(prob_e[ev])
+                ev_key = f"{col}|{ev}"
+                try:
+                    lp_ev = lambda_vec["+"].loc[ev_key]  # Series indexed by _GROUP_ID
+                    lm_ev = lambda_vec["-"].loc[ev_key]
+                    le = float((lp_ev - self.ratio * lm_ev).sum()) / float(prob_e[ev])
+                except KeyError:
+                    le = 0.0
+                    lp_ev = pd.Series(dtype=float)
+                    lm_ev = pd.Series(dtype=float)
                 for g in self._group_vals:
-                    lp_g = lambda_vec["+"].get((f"{col}|{ev}", g), 0.0)
-                    lm_g = lambda_vec["-"].get((f"{col}|{ev}", g), 0.0)
-                    pge = float(prob_ge.get((ev, g), 1e-9))
+                    pge = float(prob_ge.get((ev, g), 0.0))
+                    if pge < 1e-8:
+                        continue
+                    lp_g = float(lp_ev.get(g, 0.0))
+                    lm_g = float(lm_ev.get(g, 0.0))
                     adjust = le - (self.ratio * lp_g - lm_g) / pge
                     mask = (self.tags[col] == ev) & (self.tags[_GROUP_ID] == g)
                     signed_weights[mask] += (
@@ -865,7 +862,7 @@ class GeneralEqualizedOddsAll(ClassificationMoment):
         n_samples = len(y_train)
         self._utilities = np.zeros((n_samples, n_classes), dtype=np.float64)
         for i, cls in enumerate(self._classes):
-            self._utilities[:, i] = 1.0
+            self._utilities[:, i] = (y_train == cls).astype(float)
         self._y_p_indices = {cls: self._classes.index(cls) for cls in self._classes}
 
     @property
@@ -934,13 +931,24 @@ class GeneralEqualizedOddsAll(ClassificationMoment):
             prob_ge = self._prob_group_event[col]
 
             for ev in self.tags[col].dropna().unique():
-                lp = lambda_vec["+"].get((f"{col}|{ev}",), pd.Series(dtype=float))
-                lm = lambda_vec["-"].get((f"{col}|{ev}",), pd.Series(dtype=float))
-                le = float((lp - self.ratio * lm).sum()) / float(prob_e.get(ev, 1e-9))
+                ev_key = f"{col}|{ev}"
+                pe = float(prob_e.get(ev, 0.0))
+                if pe < 1e-8:
+                    continue
+                try:
+                    lp_ev = lambda_vec["+"].loc[ev_key]  # Series indexed by _GROUP_ID
+                    lm_ev = lambda_vec["-"].loc[ev_key]
+                    le = float((lp_ev - self.ratio * lm_ev).sum()) / pe
+                except KeyError:
+                    le = 0.0
+                    lp_ev = pd.Series(dtype=float)
+                    lm_ev = pd.Series(dtype=float)
                 for g in self._group_vals:
-                    lp_g = lambda_vec["+"].get((f"{col}|{ev}", g), 0.0)
-                    lm_g = lambda_vec["-"].get((f"{col}|{ev}", g), 0.0)
-                    pge = float(prob_ge.get((ev, g), 1e-9))
+                    pge = float(prob_ge.get((ev, g), 0.0))
+                    if pge < 1e-8:
+                        continue
+                    lp_g = float(lp_ev.get(g, 0.0))
+                    lm_g = float(lm_ev.get(g, 0.0))
                     adjust = le - (self.ratio * lp_g - lm_g) / pge
                     mask = (self.tags[col] == ev) & (self.tags[_GROUP_ID] == g)
                     signed_weights[mask] += (

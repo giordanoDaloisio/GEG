@@ -160,7 +160,9 @@ class _Lagrangian:
         L, L_high, gamma, error = self._eval(Q, lambda_hat)
         result = _GapResult(L, L, L_high, gamma, error)
         for mul in [1.0, 2.0, 5.0, 10.0]:
-            _, h_hat_idx = self.best_h(mul * lambda_hat)
+            # Clamp to [0, B] so multiplied lambdas stay in the valid dual feasible set
+            clamped_lambda = (mul * lambda_hat).clip(upper=self.B)
+            _, h_hat_idx, _ = self.best_h(clamped_lambda)
             logger.debug("%smul=%.0f", _INDENTATION, mul)
             L_low_mul, _, _, _ = self._eval(pd.Series({h_hat_idx: 1.0}), lambda_hat)
             if L_low_mul < result.L_low:
@@ -185,7 +187,7 @@ class _Lagrangian:
     def solve_linprog(self, nu):
         n_hs = len(self.hs)
         n_constraints = len(self.constraints.index)
-        if self.last_linprog_n_hs == n_hs:
+        if self.last_linprog_n_hs == n_hs and self.last_linprog_result is not None:
             return self.last_linprog_result
         c = np.concatenate((self.errors, [self.B]))
         A_ub = np.concatenate(
@@ -275,7 +277,12 @@ class _Lagrangian:
                 )
 
         redW = signed_weight_series.abs()
-        redW = self.constraints.total_samples * redW / redW.sum()  # normalization
+        w_sum = redW.sum()
+        if w_sum < _PRECISION:
+            # All signed weights are zero: fall back to uniform sample weights
+            redW = pd.Series(1.0 / len(redW), index=redW.index)
+        else:
+            redW = self.constraints.total_samples * redW / w_sum
         redY_unique = np.unique(redY)
 
         # Train the estimator (oracle) using redY and redW
@@ -306,24 +313,24 @@ class _Lagrangian:
         h = _PredictorAsCallable(classifier)
         h_error = self.obj.gamma(h).iloc[0]
         h_gamma = self.constraints.gamma(h)
-        h_value = h_error + h_gamma.dot(lambda_vec)
-        if not self.hs.empty:
-            values = self.errors + self.gammas.transpose().dot(lambda_vec)
-            best_idx = values.idxmin()
-            best_value = values[best_idx]
-        else:
-            best_idx = -1
-            best_value = np.inf
-        if h_value < best_value - _PRECISION:
-            logger.debug("%sbest_h: val improvement %f", _LINE, best_value - h_value)
-            h_idx = len(self.hs)
-            self.hs.at[h_idx] = h
-            self.predictors.at[h_idx] = classifier
-            self.errors.at[h_idx] = h_error
-            self.gammas[h_idx] = h_gamma
-            self.lambdas[h_idx] = lambda_vec.copy()
-            best_idx = h_idx
-        return self.hs[best_idx], best_idx
+        # Always store the newly trained classifier so the LP pool stays complete
+        new_h_idx = len(self.hs)
+        self.hs.at[new_h_idx] = h
+        self.predictors.at[new_h_idx] = classifier
+        self.errors.at[new_h_idx] = h_error
+        self.gammas[new_h_idx] = h_gamma
+        self.lambdas[new_h_idx] = lambda_vec.copy()
+        # Find the best classifier among all stored (including the one just added)
+        values = self.errors + self.gammas.transpose().dot(lambda_vec)
+        best_idx = values.idxmin()
+        logger.debug(
+            "%sbest_h: new=%d best=%d val=%.6f",
+            _LINE,
+            new_h_idx,
+            best_idx,
+            values[best_idx],
+        )
+        return self.hs[best_idx], best_idx, new_h_idx
 
 
 # =====================================
@@ -392,13 +399,15 @@ class GeneralizedExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
             self.lambda_vecs_EG_[t] = lambda_vec
             lambda_EG = self.lambda_vecs_EG_.mean(axis=1)
 
-            h, h_idx = lagrangian.best_h(lambda_vec)
+            h, h_idx, new_h_idx = lagrangian.best_h(lambda_vec)
 
             if t == 0:
                 if self.nu is None:
+                    # Use 0/1 residuals so nu is well-defined for any label type
+                    residuals = (h(X) != self.constraints._y_as_series).astype(float)
                     self.nu = (
                         _ACCURACY_MUL
-                        * (h(X) - self.constraints._y_as_series).abs().std()
+                        * residuals.std()
                         / np.sqrt(self.constraints.total_samples)
                     )
                 eta = self.eta0 / B
@@ -410,10 +419,12 @@ class GeneralizedExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
                     self.max_iter,
                 )
 
-            if h_idx not in Qsum.index:
-                Qsum.at[h_idx] = 0.0
-            Qsum[h_idx] += 1.0
-            gamma = lagrangian.gammas[h_idx]
+            # Track the current oracle output (not the best historical) in the mixture
+            # and use its gamma for the theta gradient, as required by Algorithm 1
+            if new_h_idx not in Qsum.index:
+                Qsum.at[new_h_idx] = 0.0
+            Qsum[new_h_idx] += 1.0
+            gamma = lagrangian.gammas[new_h_idx]
             Q_EG = Qsum / Qsum.sum()
             result_EG = lagrangian.eval_gap(Q_EG, lambda_EG, self.nu)
             gap_EG = result_EG.gap()
@@ -519,21 +530,5 @@ class GeneralizedExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
             # For All-label constraints (positive_label is None): pure argmax over all classes.
             return all_classes[np.argmax(probs, axis=1)]
 
-        predictions = []
-        for i in range(len(X)):
-            # For binary classification, use argmax to get the most likely class
-            if len(all_classes) == 2:
-                predictions.append(all_classes[np.argmax(probs[i])])
-            else:
-                # For multi-class, use probabilistic sampling
-                r = random_state.rand()
-                cumulative_prob = 0
-                for j, cls in enumerate(all_classes):
-                    cumulative_prob += probs[i, j]
-                    if r <= cumulative_prob:
-                        predictions.append(cls)
-                        break
-                else:
-                    # Fallback to most likely class
-                    predictions.append(all_classes[np.argmax(probs[i])])
-        return np.array(predictions)
+        # Use argmax for all cases: deterministic, reproducible, consistent with binary path
+        return all_classes[np.argmax(probs, axis=1)]
