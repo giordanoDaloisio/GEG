@@ -121,7 +121,13 @@ def run_experiment(dataset: str, data: pd.DataFrame, n_splits=10, model_name="lr
 
 
 def run_experiment_geg(
-    dataset: str, data: pd.DataFrame, constraint_type: str, n_splits=10, model_name="lr"
+    dataset: str,
+    data: pd.DataFrame,
+    constraint_type: str,
+    n_splits=10,
+    model_name="lr",
+    difference_bound=0.005,
+    ratio_bound_slack=1e-7,
 ):
     label, pos_label, priv_group, unpriv_group = get_values(dataset)
     X = data.drop(columns=[label])
@@ -138,10 +144,12 @@ def run_experiment_geg(
 
         if constraint_type == "dp":
             constraint = GeneralDemographicParity1(
-                y_p=pos_label, difference_bound=0.005
+                y_p=pos_label, difference_bound=difference_bound
             )
         elif constraint_type == "eo":
-            constraint = GeneralEqualizedOdds1(y_p=pos_label, difference_bound=0.005)
+            constraint = GeneralEqualizedOdds1(
+                y_p=pos_label, difference_bound=difference_bound
+            )
         elif constraint_type == "cp":
             constraint = CombinedParityGeneral1(
                 use_dp=True,
@@ -149,7 +157,7 @@ def run_experiment_geg(
                 y_p=pos_label,
                 dp_bound=0.05,
                 eo_bound=0.05,
-                ratio_bound_slack=1e-7,
+                ratio_bound_slack=ratio_bound_slack,
             )
         else:
             raise ValueError(
@@ -225,7 +233,13 @@ def run_experiment_geg(
 
 
 def run_experiment_geg_multi(
-    dataset: str, data: pd.DataFrame, constraint_type: str, n_splits=10, model_name="lr"
+    dataset: str,
+    data: pd.DataFrame,
+    constraint_type: str,
+    n_splits=10,
+    model_name="lr",
+    difference_bound=0.005,
+    ratio_bound_slack=1e-7,
 ):
     label, pos_label, priv_group, unpriv_group = get_values(dataset)
     X = data.drop(columns=[label])
@@ -241,15 +255,19 @@ def run_experiment_geg_multi(
         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
         if constraint_type == "dp":
-            constraint = GeneralDemographicParityAll(difference_bound=0.005)
+            constraint = GeneralDemographicParityAll(
+                difference_bound=difference_bound, ratio_bound_slack=ratio_bound_slack
+            )
         elif constraint_type == "eo":
-            constraint = GeneralEqualizedOddsAll(difference_bound=0.005)
+            constraint = GeneralEqualizedOddsAll(
+                difference_bound=difference_bound, ratio_bound_slack=ratio_bound_slack
+            )
         elif constraint_type == "cp":
             constraint = CombinedParityGeneralAll(
                 use_dp=True,
                 use_eo=True,
-                dp_bound=0.05,
-                eo_bound=0.05,
+                dp_bound=difference_bound,
+                eo_bound=difference_bound,
             )
         else:
             raise ValueError(
@@ -324,7 +342,9 @@ def run_experiment_geg_multi(
     return pd.DataFrame(results)
 
 
-def run_experiment_blackbox(dataset: str, data: pd.DataFrame, n_splits=10):
+def run_experiment_blackbox(
+    dataset: str, data: pd.DataFrame, n_splits=10, model_name="lr"
+):
     label, pos_label, priv_group, unpriv_group = get_values(dataset)
     X = data.drop(columns=[label])
     y = data[label]
@@ -338,7 +358,15 @@ def run_experiment_blackbox(dataset: str, data: pd.DataFrame, n_splits=10):
         X_train, X_test = X.iloc[train_index], X.iloc[test_index]
         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
-        model = LogisticRegression()
+        if model_name == "lr":
+            model = LogisticRegression()
+        elif model_name == "rf":
+            model = RandomForestClassifier()
+        elif model_name == "xgb":
+            model = GradientBoostingClassifier()
+        else:
+            raise ValueError("Invalid model type. Choose from 'lr', 'rf', or 'xgb'.")
+
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test.values)
 
@@ -388,7 +416,7 @@ def run_experiment_blackbox(dataset: str, data: pd.DataFrame, n_splits=10):
     return pd.DataFrame(results)
 
 
-def run_experiment_demv(dataset: str, data: pd.DataFrame, n_splits=10):
+def run_experiment_demv(dataset: str, data: pd.DataFrame, n_splits=10, model_name="lr"):
     label, pos_label, priv_group, unpriv_group = get_values(dataset)
     X = data.drop(columns=[label])
     y = data[label]
@@ -403,7 +431,15 @@ def run_experiment_demv(dataset: str, data: pd.DataFrame, n_splits=10):
         X_train, X_test = X.iloc[train_index], X.iloc[test_index]
         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
-        model = LogisticRegression()
+        if model_name == "lr":
+            model = LogisticRegression()
+        elif model_name == "rf":
+            model = RandomForestClassifier()
+        elif model_name == "xgb":
+            model = GradientBoostingClassifier()
+        else:
+            raise ValueError("Invalid model type. Choose from 'lr', 'rf', or 'xgb'.")
+
         X_train, y_train = demv.fit_transform(X_train, y_train)
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test.values)
