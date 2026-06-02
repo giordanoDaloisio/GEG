@@ -116,6 +116,13 @@ class _Lagrangian:
         self.n_oracle_calls = 0
         self.oracle_execution_times = []
         self.n_oracle_calls_dummy_returned = 0
+        # Cache of fitted oracles keyed by the exact (relabeled targets, weights)
+        # passed to the estimator. Near the dual optimum the lambda vectors
+        # collapse, so successive best_h / eval_gap calls relabel the data
+        # identically and would otherwise refit the (expensive) oracle on
+        # byte-identical inputs. Reusing the fitted model in that case is lossless.
+        self._oracle_cache = {}
+        self.n_oracle_calls_cached = 0
         self.last_linprog_n_hs = 0
         self.last_linprog_result = None
         self.sample_weight_name = sample_weight_name
@@ -285,6 +292,27 @@ class _Lagrangian:
             redW = self.constraints.total_samples * redW / w_sum
         redY_unique = np.unique(redY)
 
+        # Reuse a previously fitted oracle when the relabeling is byte-for-byte
+        # identical (a frequent occurrence once the dual variables converge).
+        # This is exact -- the estimator is fit on the same X, targets and
+        # weights -- so it changes nothing but the runtime.
+        cache_key = None
+        try:
+            redY_bytes = np.ascontiguousarray(
+                np.asarray(redY.to_numpy(), dtype=np.float64)
+            ).tobytes()
+            redW_bytes = np.ascontiguousarray(
+                np.asarray(redW.to_numpy(), dtype=np.float64)
+            ).tobytes()
+            cache_key = (redY_bytes, redW_bytes)
+        except (TypeError, ValueError):
+            cache_key = None  # non-numeric labels: skip caching, stay correct
+
+        self.n_oracle_calls += 1
+        if cache_key is not None and cache_key in self._oracle_cache:
+            self.n_oracle_calls_cached += 1
+            return self._oracle_cache[cache_key]
+
         # Train the estimator (oracle) using redY and redW
         if len(redY_unique) == 1:
             logger.debug("redY had single value. Using DummyClassifier")
@@ -296,7 +324,8 @@ class _Lagrangian:
         oracle_call_start_time = time()
         estimator.fit(self.constraints.X, redY, **{self.sample_weight_name: redW})
         self.oracle_execution_times.append(time() - oracle_call_start_time)
-        self.n_oracle_calls += 1
+        if cache_key is not None:
+            self._oracle_cache[cache_key] = estimator
         return estimator
 
     # =========================================================
@@ -489,6 +518,7 @@ class GeneralizedExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
         self.last_iter_ = len(Qs) - 1
         self.predictors_ = lagrangian.predictors
         self.n_oracle_calls_ = lagrangian.n_oracle_calls
+        self.n_oracle_calls_cached_ = lagrangian.n_oracle_calls_cached
         self.n_oracle_calls_dummy_returned_ = lagrangian.n_oracle_calls_dummy_returned
         self.oracle_execution_times_ = lagrangian.oracle_execution_times
         self.lambda_vecs_ = lagrangian.lambdas
