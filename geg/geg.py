@@ -410,6 +410,16 @@ class GeneralizedExponentiatedGradient(BaseEstimator, MetaEstimatorMixin):
                         * residuals.std()
                         / np.sqrt(self.constraints.total_samples)
                     )
+                    # Strong oracles (random forests, gradient boosting, ...) fit
+                    # the training set almost perfectly, so the residuals are all
+                    # zero and their std -- and therefore nu -- collapses to ~0. A
+                    # zero threshold disables the duality-gap stopping rule (gaps
+                    # are always >= 0), forcing every run to exhaust max_iter and
+                    # retrain the (expensive) oracle each time. Floor nu at the
+                    # statistical-uncertainty scale so convergence is detected once
+                    # the gap is effectively closed.
+                    if self.nu < _PRECISION:
+                        self.nu = _ACCURACY_MUL / np.sqrt(self.constraints.total_samples)
                 eta = self.eta0 / B
                 logger.debug(
                     "...eps=%.3f, B=%.1f, nu=%.6f, max_iter=%d",
