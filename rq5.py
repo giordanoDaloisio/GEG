@@ -24,7 +24,7 @@ if __name__ == "__main__":
                 df = pd.read_csv(os.path.join("experiments/data", data))
 
                 for constraint in ["dp", "eo", "cp"]:
-                    for i in [1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]:
+                    for i in np.arange(0, 0.0001, 0.0005):
                         print(
                             f"Running GEG experiment full with constraint: {constraint} and ratio_bound_slack: {i}"
                         )

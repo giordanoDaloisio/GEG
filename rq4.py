@@ -10,7 +10,7 @@ import os
 if __name__ == "__main__":
 
     multiclass_data = [
-        "cmc.csv",
+        # "cmc.csv",
         "crime.csv",
         "drug.csv",
         "law.csv",

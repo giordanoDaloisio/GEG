@@ -294,18 +294,24 @@ def run_experiment_geg_multi(
 
         if constraint_type == "dp":
             constraint = GeneralDemographicParityAll(
-                difference_bound=difference_bound, ratio_bound_slack=ratio_bound_slack
+                # difference_bound=difference_bound,
+                ratio_bound_slack=ratio_bound_slack,
+                ratio_bound=0.1,
             )
         elif constraint_type == "eo":
             constraint = GeneralEqualizedOddsAll(
-                difference_bound=difference_bound, ratio_bound_slack=ratio_bound_slack
+                # difference_bound=difference_bound,
+                ratio_bound_slack=ratio_bound_slack,
+                ratio_bound=0.1,
             )
         elif constraint_type == "cp":
             constraint = CombinedParityGeneralAll(
                 use_dp=True,
                 use_eo=True,
-                dp_bound=difference_bound,
-                eo_bound=difference_bound,
+                # dp_bound=difference_bound,
+                # eo_bound=difference_bound,
+                # ratio_bound_slack=ratio_bound_slack,
+                # ratio_bound=0.1,
             )
         else:
             raise ValueError(
@@ -317,7 +323,9 @@ def run_experiment_geg_multi(
             # min_samples_leaf, class_weight) so a strong RF stops fitting the
             # relabeled train set perfectly -- which is what makes the fairness
             # constraint transfer to test. Default None preserves prior behavior.
-            estimator = RandomForestClassifier(random_state=42, **(estimator_params or {}))
+            estimator = RandomForestClassifier(
+                random_state=42, **(estimator_params or {})
+            )
         elif model_name == "svm":
             # Use balanced class weights and probability estimates for better handling of imbalanced data
             estimator = SVC(class_weight="balanced", probability=True, random_state=42)
