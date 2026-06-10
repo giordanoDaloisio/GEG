@@ -5,6 +5,9 @@ from sklearn.model_selection import KFold
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.preprocessing import LabelEncoder
+from xgboost import XGBClassifier
 from geg.geg import GeneralizedExponentiatedGradient
 from geg.constraints import (
     GeneralDemographicParity1,
@@ -20,6 +23,39 @@ from demv import DEMV
 from ml_debiaser.reduce_to_binary import Reduce2Binary
 
 np.random.seed(42)
+
+
+class XGBClassifierWrapper(BaseEstimator, ClassifierMixin):
+    """sklearn-compatible wrapper around ``xgboost.XGBClassifier``.
+
+    ``XGBClassifier`` requires class labels to be contiguous integers ``0..K-1``,
+    but the datasets here use arbitrary label values (e.g. wine quality ``[4,5,6,7]``,
+    crime ``[100,200,...]``) and GEG relabels targets to those *original* values in its
+    oracle. This wrapper label-encodes ``y`` on ``fit`` and decodes predictions back to
+    the original labels on ``predict``, while forwarding ``sample_weight`` (which GEG's
+    oracle passes on every refit). Being a ``BaseEstimator`` keeps it cloneable, as GEG
+    relies on ``sklearn.clone``.
+    """
+
+    def __init__(self, n_estimators=100, random_state=42):
+        self.n_estimators = n_estimators
+        self.random_state = random_state
+
+    def fit(self, X, y, sample_weight=None):
+        self._encoder = LabelEncoder()
+        y_enc = self._encoder.fit_transform(y)
+        self.classes_ = self._encoder.classes_
+        self._model = XGBClassifier(
+            n_estimators=self.n_estimators,
+            random_state=self.random_state,
+            n_jobs=-1,
+            tree_method="hist",
+        )
+        self._model.fit(X, y_enc, sample_weight=sample_weight)
+        return self
+
+    def predict(self, X):
+        return self._encoder.inverse_transform(self._model.predict(X))
 
 
 def get_values(dataset: str):
@@ -65,16 +101,16 @@ def run_experiment(dataset: str, data: pd.DataFrame, n_splits=10, model_name="lr
         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
         if model_name == "rf":
-            model = RandomForestClassifier()
+            model = RandomForestClassifier(random_state=42)
         elif model_name == "svm":
             # Use balanced class weights for better handling of imbalanced data
-            model = SVC(class_weight="balanced")
+            model = SVC(class_weight="balanced", random_state=42)
         elif model_name == "mlp":
-            model = MLPClassifier()
+            model = MLPClassifier(random_state=42)
         elif model_name == "xgb":
-            model = GradientBoostingClassifier()
+            model = XGBClassifierWrapper()
         elif model_name == "lr":
-            model = LogisticRegression()
+            model = LogisticRegression(random_state=42)
         else:
             raise ValueError(
                 "Invalid model type. Choose from 'rf', 'svm', 'mlp', 'xgb', or 'lr'."
@@ -165,16 +201,16 @@ def run_experiment_geg(
             )
 
         if model_name == "rf":
-            estimator = RandomForestClassifier()
+            estimator = RandomForestClassifier(random_state=42)
         elif model_name == "svm":
             # Use balanced class weights and probability estimates for better handling of imbalanced data
-            estimator = SVC(class_weight="balanced", probability=True)
+            estimator = SVC(class_weight="balanced", probability=True, random_state=42)
         elif model_name == "mlp":
-            estimator = MLPClassifier()
+            estimator = MLPClassifier(random_state=42)
         elif model_name == "xgb":
-            estimator = GradientBoostingClassifier()
+            estimator = XGBClassifierWrapper()
         elif model_name == "lr":
-            estimator = LogisticRegression()
+            estimator = LogisticRegression(random_state=42)
         else:
             raise ValueError(
                 "Invalid model type. Choose from 'rf', 'svm', 'mlp', 'xgb', or 'lr'."
@@ -240,6 +276,8 @@ def run_experiment_geg_multi(
     model_name="lr",
     difference_bound=0.005,
     ratio_bound_slack=1e-7,
+    eps=1e-5,
+    estimator_params=None,
 ):
     label, pos_label, priv_group, unpriv_group = get_values(dataset)
     X = data.drop(columns=[label])
@@ -275,16 +313,20 @@ def run_experiment_geg_multi(
             )
 
         if model_name == "rf":
-            estimator = RandomForestClassifier()
+            # estimator_params lets callers regularize the oracle (e.g. max_depth,
+            # min_samples_leaf, class_weight) so a strong RF stops fitting the
+            # relabeled train set perfectly -- which is what makes the fairness
+            # constraint transfer to test. Default None preserves prior behavior.
+            estimator = RandomForestClassifier(random_state=42, **(estimator_params or {}))
         elif model_name == "svm":
             # Use balanced class weights and probability estimates for better handling of imbalanced data
-            estimator = SVC(class_weight="balanced", probability=True)
+            estimator = SVC(class_weight="balanced", probability=True, random_state=42)
         elif model_name == "mlp":
-            estimator = MLPClassifier()
+            estimator = MLPClassifier(random_state=42)
         elif model_name == "xgb":
-            estimator = GradientBoostingClassifier()
+            estimator = XGBClassifierWrapper()
         elif model_name == "lr":
-            estimator = LogisticRegression()
+            estimator = LogisticRegression(random_state=42)
         else:
             raise ValueError(
                 "Invalid model type. Choose from 'rf', 'svm', 'mlp', 'xgb', or 'lr'."
@@ -293,7 +335,7 @@ def run_experiment_geg_multi(
         geg = GeneralizedExponentiatedGradient(
             estimator=estimator,
             constraints=constraint,
-            eps=1e-5,
+            eps=eps,
             positive_label=pos_label,
         )
 
@@ -359,11 +401,11 @@ def run_experiment_blackbox(
         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
         if model_name == "lr":
-            model = LogisticRegression()
+            model = LogisticRegression(random_state=42)
         elif model_name == "rf":
-            model = RandomForestClassifier()
+            model = RandomForestClassifier(random_state=42)
         elif model_name == "xgb":
-            model = GradientBoostingClassifier()
+            model = XGBClassifierWrapper()
         else:
             raise ValueError("Invalid model type. Choose from 'lr', 'rf', or 'xgb'.")
 
@@ -432,11 +474,11 @@ def run_experiment_demv(dataset: str, data: pd.DataFrame, n_splits=10, model_nam
         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
         if model_name == "lr":
-            model = LogisticRegression()
+            model = LogisticRegression(random_state=42)
         elif model_name == "rf":
-            model = RandomForestClassifier()
+            model = RandomForestClassifier(random_state=42)
         elif model_name == "xgb":
-            model = GradientBoostingClassifier()
+            model = XGBClassifierWrapper()
         else:
             raise ValueError("Invalid model type. Choose from 'lr', 'rf', or 'xgb'.")
 
@@ -496,7 +538,7 @@ def run_experiment_r2b(dataset: str, data: pd.DataFrame, n_splits=10):
         X_train, X_test = X.iloc[train_index], X.iloc[test_index]
         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
-        model = LogisticRegression()
+        model = LogisticRegression(random_state=42)
         y_one_hot = pd.get_dummies(y_train).values
         y_one_hot = r2b.fit(
             y_one_hot, group_feature=X_train[list(priv_group.keys())[0]].values

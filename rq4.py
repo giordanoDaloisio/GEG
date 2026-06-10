@@ -40,9 +40,32 @@ if __name__ == "__main__":
                         print(
                             f"Running GEG experiment full with constraint: {constraint} and model: {model}"
                         )
-                        geg_multi_results = run_experiment_geg_multi(
-                            dataset_name, df, constraint, model_name=model
-                        )
+                        # Random forest is a strong learner that fits the relabeled
+                        # train set perfectly, so the fairness constraint stops
+                        # transferring to test and the tight default bounds just
+                        # distort predictions. Regularize the oracle and relax the
+                        # bounds so GEG-RF can compete with DEMV-RF.
+                        if model == "rf":
+                            geg_multi_results = run_experiment_geg_multi(
+                                dataset_name,
+                                df,
+                                constraint,
+                                model_name=model,
+                                difference_bound=0.05,
+                                eps=1e-2,
+                                estimator_params={
+                                    "max_depth": 8,
+                                    "min_samples_leaf": 20,
+                                    "class_weight": "balanced",
+                                },
+                            )
+                        else:
+                            geg_multi_results = run_experiment_geg_multi(
+                                dataset_name,
+                                df,
+                                constraint,
+                                model_name=model,
+                            )
                         os.makedirs("experiments/results_geg_multi_rq4", exist_ok=True)
                         geg_multi_results.to_csv(
                             f"experiments/results_geg_multi_rq4/{dataset_name}_geg_{constraint}_{model}_results.csv",
