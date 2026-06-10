@@ -274,8 +274,9 @@ def run_experiment_geg_multi(
     constraint_type: str,
     n_splits=10,
     model_name="lr",
-    difference_bound=0.005,
+    difference_bound=0.05,
     ratio_bound_slack=1e-7,
+    eta=2.0,
     eps=1e-5,
     estimator_params=None,
 ):
@@ -294,24 +295,18 @@ def run_experiment_geg_multi(
 
         if constraint_type == "dp":
             constraint = GeneralDemographicParityAll(
-                # difference_bound=difference_bound,
-                ratio_bound_slack=ratio_bound_slack,
-                ratio_bound=0.1,
+                difference_bound=difference_bound,
             )
         elif constraint_type == "eo":
             constraint = GeneralEqualizedOddsAll(
-                # difference_bound=difference_bound,
-                ratio_bound_slack=ratio_bound_slack,
-                ratio_bound=0.1,
+                difference_bound=difference_bound,
             )
         elif constraint_type == "cp":
             constraint = CombinedParityGeneralAll(
                 use_dp=True,
                 use_eo=True,
-                # dp_bound=difference_bound,
-                # eo_bound=difference_bound,
-                # ratio_bound_slack=ratio_bound_slack,
-                # ratio_bound=0.1,
+                dp_bound=difference_bound,
+                eo_bound=difference_bound,
             )
         else:
             raise ValueError(
@@ -345,6 +340,7 @@ def run_experiment_geg_multi(
             constraints=constraint,
             eps=eps,
             positive_label=pos_label,
+            eta0=eta,
         )
 
         geg.fit(

@@ -15,7 +15,6 @@ if __name__ == "__main__":
         "park.csv",
         "wine.csv",
     ]
-    # multiclass_data = ["cmc.csv"]
     for data in os.listdir("experiments/data"):
         if data.endswith(".csv"):
             if data in multiclass_data:
@@ -24,47 +23,47 @@ if __name__ == "__main__":
                 df = pd.read_csv(os.path.join("experiments/data", data))
 
                 for constraint in ["dp", "eo", "cp"]:
-                    for i in np.arange(0, 0.0001, 0.0005):
+                    for i in np.arange(1.0, 10.0, 0.5):
                         print(
-                            f"Running GEG experiment full with constraint: {constraint} and ratio_bound_slack: {i}"
+                            f"Running GEG experiment full with constraint: {constraint} and eta: {i}"
                         )
                         start_time = time()
                         geg_multi_results = run_experiment_geg_multi(
-                            dataset_name, df, constraint, ratio_bound_slack=i
+                            dataset_name, df, constraint, eta=i
                         )
                         end_time = time()
                         print(
                             f"GEG experiment with constraint {constraint} took {end_time - start_time} seconds."
                         )
                         os.makedirs(
-                            "experiments/results_geg_rq5_ratio_bound_slack",
+                            "experiments/results_geg_rq5_eta",
                             exist_ok=True,
                         )
                         os.makedirs(
-                            "experiments/results_geg_rq5_ratio_bound_slack/time",
+                            "experiments/results_geg_rq5_eta/time",
                             exist_ok=True,
                         )
-                        geg_multi_results["ratio_bound_slack"] = i
+                        geg_multi_results["eta"] = i
                         if os.path.exists(
-                            f"experiments/results_geg_rq5_ratio_bound_slack/{dataset_name}_geg_{constraint}_results.csv"
+                            f"experiments/results_geg_rq5_eta/{dataset_name}_geg_{constraint}_results.csv"
                         ):
                             existing_results = pd.read_csv(
-                                f"experiments/results_geg_rq5_ratio_bound_slack/{dataset_name}_geg_{constraint}_results.csv"
+                                f"experiments/results_geg_rq5_eta/{dataset_name}_geg_{constraint}_results.csv"
                             )
                             combined_results = pd.concat(
                                 [existing_results, geg_multi_results], ignore_index=True
                             )
                             combined_results.to_csv(
-                                f"experiments/results_geg_rq5_ratio_bound_slack/{dataset_name}_geg_{constraint}_results.csv",
+                                f"experiments/results_geg_rq5_eta/{dataset_name}_geg_{constraint}_results.csv",
                                 index=False,
                             )
                         else:
                             geg_multi_results.to_csv(
-                                f"experiments/results_geg_rq5_ratio_bound_slack/{dataset_name}_geg_{constraint}_results.csv",
+                                f"experiments/results_geg_rq5_eta/{dataset_name}_geg_{constraint}_results.csv",
                                 index=False,
                             )
                         with open(
-                            f"experiments/results_geg_rq5/time/{dataset_name}_geg_{constraint}_time.txt",
+                            f"experiments/results_geg_rq5_eta/time/{dataset_name}_geg_{constraint}_time.txt",
                             "a",
                         ) as f:
                             f.write(str(end_time - start_time))
