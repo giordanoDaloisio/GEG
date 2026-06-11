@@ -7,10 +7,27 @@ from utils import (
 )
 import os
 
+# Oracle regularization per base model. Strong learners (RF/XGB) fit the train
+# set perfectly, which makes every fairness constraint look satisfied on train
+# (e.g. TPR=1 for every group), so the dual variables never move and GEG
+# degenerates to the baseline. A mildly regularized oracle keeps the constraint
+# violations visible during training so the correction transfers to test, at a
+# small accuracy cost. class_weight="balanced" must NOT be used: it rescales
+# the cost-sensitive sample weights GEG passes to the oracle.
+GEG_ORACLE_PARAMS = {
+    "rf": {"min_samples_leaf": 5},
+    "xgb": {"max_depth": 3, "learning_rate": 0.1, "min_child_weight": 5},
+}
+
+# B = 1/eps bounds the dual variables. The previous 1e-5 (B=1e5) let LP-dual
+# lambdas reach 1e5, producing pure-fairness oracle calls whose classifiers
+# were noise (train accuracy < 0.3) yet entered the final mixture.
+GEG_EPS = 1e-2
+
 if __name__ == "__main__":
 
     multiclass_data = [
-        # "cmc.csv",
+        "cmc.csv",
         "crime.csv",
         "drug.csv",
         "law.csv",
@@ -18,7 +35,6 @@ if __name__ == "__main__":
         "wine.csv",
         "obesity.csv",
     ]
-    # multiclass_data = ['park.csv']
     for data in os.listdir("experiments/data"):
         if data.endswith(".csv"):
             if data in multiclass_data:
@@ -27,10 +43,16 @@ if __name__ == "__main__":
                 df = pd.read_csv(os.path.join("experiments/data", data))
 
                 for model in ["rf", "xgb"]:
-                    #   print(f"Running experiment with model: {model}")
-                    #   model_results = run_experiment(dataset_name, df, model_name=model)
-                    #   os.makedirs('experiments/results_models', exist_ok=True)
-                    #   model_results.to_csv(f'experiments/results_models/{dataset_name}_{model}_results.csv', index=False)
+                    # Regenerate the unmitigated baseline with the current
+                    # XGBClassifierWrapper: the saved wine/xgb baseline was
+                    # produced by an older wrapper and is ~7pt too low.
+                    print(f"Running experiment with model: {model}")
+                    model_results = run_experiment(dataset_name, df, model_name=model)
+                    os.makedirs("experiments/results_models", exist_ok=True)
+                    model_results.to_csv(
+                        f"experiments/results_models/{dataset_name}_{model}_results.csv",
+                        index=False,
+                    )
 
                     for constraint in ["dp", "eo", "cp"]:
                         # print(f"Running GEG experiment with constraint: {constraint}")
@@ -40,32 +62,15 @@ if __name__ == "__main__":
                         print(
                             f"Running GEG experiment full with constraint: {constraint} and model: {model}"
                         )
-                        # Random forest is a strong learner that fits the relabeled
-                        # train set perfectly, so the fairness constraint stops
-                        # transferring to test and the tight default bounds just
-                        # distort predictions. Regularize the oracle and relax the
-                        # bounds so GEG-RF can compete with DEMV-RF.
-                        if model == "rf":
-                            geg_multi_results = run_experiment_geg_multi(
-                                dataset_name,
-                                df,
-                                constraint,
-                                model_name=model,
-                                difference_bound=0.05,
-                                eps=1e-2,
-                                estimator_params={
-                                    "max_depth": 8,
-                                    "min_samples_leaf": 20,
-                                    "class_weight": "balanced",
-                                },
-                            )
-                        else:
-                            geg_multi_results = run_experiment_geg_multi(
-                                dataset_name,
-                                df,
-                                constraint,
-                                model_name=model,
-                            )
+                        geg_multi_results = run_experiment_geg_multi(
+                            dataset_name,
+                            df,
+                            constraint,
+                            model_name=model,
+                            difference_bound=0.05,
+                            eps=GEG_EPS,
+                            estimator_params=GEG_ORACLE_PARAMS[model],
+                        )
                         os.makedirs("experiments/results_geg_multi_rq4", exist_ok=True)
                         geg_multi_results.to_csv(
                             f"experiments/results_geg_multi_rq4/{dataset_name}_geg_{constraint}_{model}_results.csv",

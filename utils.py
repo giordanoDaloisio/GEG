@@ -37,19 +37,47 @@ class XGBClassifierWrapper(BaseEstimator, ClassifierMixin):
     relies on ``sklearn.clone``.
     """
 
-    def __init__(self, n_estimators=100, random_state=42):
+    def __init__(
+        self,
+        n_estimators=100,
+        random_state=42,
+        max_depth=None,
+        learning_rate=None,
+        min_child_weight=None,
+        subsample=None,
+        reg_lambda=None,
+    ):
         self.n_estimators = n_estimators
         self.random_state = random_state
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.min_child_weight = min_child_weight
+        self.subsample = subsample
+        self.reg_lambda = reg_lambda
 
     def fit(self, X, y, sample_weight=None):
         self._encoder = LabelEncoder()
         y_enc = self._encoder.fit_transform(y)
         self.classes_ = self._encoder.classes_
+        # Optional regularization knobs; None falls back to the XGBoost default
+        # so existing callers keep byte-identical behavior.
+        extra = {
+            k: v
+            for k, v in {
+                "max_depth": self.max_depth,
+                "learning_rate": self.learning_rate,
+                "min_child_weight": self.min_child_weight,
+                "subsample": self.subsample,
+                "reg_lambda": self.reg_lambda,
+            }.items()
+            if v is not None
+        }
         self._model = XGBClassifier(
             n_estimators=self.n_estimators,
             random_state=self.random_state,
             n_jobs=-1,
             tree_method="hist",
+            **extra,
         )
         self._model.fit(X, y_enc, sample_weight=sample_weight)
         return self
@@ -327,7 +355,10 @@ def run_experiment_geg_multi(
         elif model_name == "mlp":
             estimator = MLPClassifier(random_state=42)
         elif model_name == "xgb":
-            estimator = XGBClassifierWrapper()
+            # estimator_params plays the same role as for RF: regularize the
+            # boosting oracle (max_depth, learning_rate, ...) so it cannot
+            # memorize the relabeled train set.
+            estimator = XGBClassifierWrapper(**(estimator_params or {}))
         elif model_name == "lr":
             estimator = LogisticRegression(random_state=42)
         else:

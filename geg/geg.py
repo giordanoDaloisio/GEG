@@ -236,15 +236,51 @@ class _Lagrangian:
     # Generate new training labels (redY) based on fairness constraints
     # ===============================
     def _call_oracle(self, lambda_vec):
-        signed_weights = self.obj.signed_weights() + self.constraints.signed_weights(
-            lambda_vec
-        )
         signed_y = self.constraints._y_as_series.copy()
-        signed_weight_series = signed_weights.copy()
         unique_classes = np.sort(np.unique(signed_y))
 
         # y_p is None for "All" constraints that iterate over every label
         y_p = getattr(self.constraints, "y_p", None)
+
+        per_class_rewards = getattr(self.constraints, "per_class_rewards", None)
+        if per_class_rewards is not None and len(unique_classes) > 2 and y_p is None:
+            # Proper cost-sensitive multiclass reduction for "All" constraints.
+            # rewards[i, k] is the Lagrangian gain of predicting class k for
+            # sample i; the objective adds its gain on the true label. The
+            # oracle target is the reward-maximizing class and the sample
+            # weight is the reward spread (exact for K=2, the standard
+            # importance-weighted approximation for K>2). This replaces the
+            # earlier scalar heuristic that relabeled negative-weight samples
+            # to the "next class mod K", which strong oracles (RF/XGB) just
+            # memorized as label noise.
+            rewards = per_class_rewards(lambda_vec)
+            classes = list(rewards.columns)
+            R = rewards.to_numpy(dtype=np.float64, copy=True)
+            cls_to_col = {c: j for j, c in enumerate(classes)}
+            rows = np.arange(len(signed_y))
+            true_cols = np.array([cls_to_col[c] for c in signed_y.values])
+            R[rows, true_cols] += np.asarray(
+                self.obj.signed_weights(), dtype=np.float64
+            )
+            # Deterministic tie-breaking: prefer the true label, then more
+            # frequent classes (ties happen e.g. under pure-EO pressure where
+            # every wrong class has identical reward).
+            class_prior = (
+                signed_y.value_counts(normalize=True).reindex(classes).fillna(0.0)
+            )
+            R += 1e-9 * class_prior.to_numpy()
+            R[rows, true_cols] += 1e-8
+            best_cols = R.argmax(axis=1)
+            redY = pd.Series(
+                np.asarray(classes)[best_cols], index=signed_y.index
+            )
+            redW = pd.Series(R.max(axis=1) - R.min(axis=1), index=signed_y.index)
+            return self._fit_oracle(redY, redW)
+
+        signed_weights = self.obj.signed_weights() + self.constraints.signed_weights(
+            lambda_vec
+        )
+        signed_weight_series = signed_weights.copy()
 
         if len(unique_classes) == 2:
             # Binary classification
@@ -267,10 +303,8 @@ class _Lagrangian:
                     index=signed_y.index,
                 )
             else:
-                # "All" constraints: no single positive label.
-                # Positive weight  → push toward the true label (correct prediction reduces loss).
-                # Negative weight  → push toward the *next* class in sorted order (mod K),
-                # cycling across all K classes so every class can be targeted.
+                # "All" constraints without per-class rewards: positive weight
+                # keeps the true label, negative pushes to the next class mod K.
                 K = len(unique_classes)
                 cls_to_idx = {c: i for i, c in enumerate(unique_classes)}
                 next_class = np.array(
@@ -284,6 +318,13 @@ class _Lagrangian:
                 )
 
         redW = signed_weight_series.abs()
+        return self._fit_oracle(redY, redW)
+
+    # =========================================================
+    # Shared tail of the oracle call: normalize weights, check the
+    # cache, fit the estimator on the relabeled data.
+    # =========================================================
+    def _fit_oracle(self, redY, redW):
         w_sum = redW.sum()
         if w_sum < _PRECISION:
             # All signed weights are zero: fall back to uniform sample weights

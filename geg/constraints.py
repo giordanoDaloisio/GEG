@@ -774,6 +774,43 @@ class GeneralDemographicParityAll(ClassificationMoment):
 
         return signed_weights
 
+    def per_class_rewards(self, lambda_vec):
+        """Per-sample, per-class Lagrangian rewards.
+
+        Entry (i, k) is the coefficient of the indicator 1{h(x_i)=k} in
+        -L(h, lambda) (a *gain*): predicting class k for sample i changes the
+        Lagrangian by -reward/n. Unlike ``signed_weights`` -- which collapses
+        the constraint pressure onto each sample's true label -- this keeps
+        the pressure on every class, so the oracle can relabel toward the
+        specific class the constraints push for (proper cost-sensitive
+        multiclass reduction).
+        """
+        groups = self.tags[_GROUP_ID]
+        rewards = pd.DataFrame(0.0, index=self.tags.index, columns=self._classes)
+
+        for cls, col in zip(self._classes, self._dp_event_cols):
+            prob_e = self._prob_event[col]
+            prob_ge = self._prob_group_event[col]
+            for ev in self.tags[col].dropna().unique():
+                ev_key = f"{col}|{ev}"
+                try:
+                    lp_ev = lambda_vec["+"].loc[ev_key]
+                    lm_ev = lambda_vec["-"].loc[ev_key]
+                except KeyError:
+                    continue
+                le = float((lp_ev - self.ratio * lm_ev).sum()) / float(prob_e[ev])
+                for g in self._group_vals:
+                    pge = float(prob_ge.get((ev, g), 0.0))
+                    if pge < 1e-8:
+                        continue
+                    lp_g = float(lp_ev.get(g, 0.0))
+                    lm_g = float(lm_ev.get(g, 0.0))
+                    adjust = le - (self.ratio * lp_g - lm_g) / pge
+                    mask = (self.tags[col] == ev) & (groups == g)
+                    rewards.loc[mask, cls] += adjust
+
+        return rewards
+
     def __repr__(self):
         return f"GeneralDemographicParityAll(eps={self.eps}, ratio={self.ratio})"
 
@@ -957,6 +994,41 @@ class GeneralEqualizedOddsAll(ClassificationMoment):
 
         return signed_weights
 
+    def per_class_rewards(self, lambda_vec):
+        """Per-sample, per-class Lagrangian rewards (see GeneralDemographicParityAll).
+
+        For EO the event of class k only contains samples with Y=k, so each
+        sample receives constraint pressure on its true-label column only.
+        """
+        groups = self.tags[_GROUP_ID]
+        rewards = pd.DataFrame(0.0, index=self.tags.index, columns=self._classes)
+
+        for cls, col in zip(self._classes, self._eo_event_cols):
+            prob_e = self._prob_event[col]
+            prob_ge = self._prob_group_event[col]
+            for ev in self.tags[col].dropna().unique():
+                ev_key = f"{col}|{ev}"
+                pe = float(prob_e.get(ev, 0.0))
+                if pe < 1e-8:
+                    continue
+                try:
+                    lp_ev = lambda_vec["+"].loc[ev_key]
+                    lm_ev = lambda_vec["-"].loc[ev_key]
+                except KeyError:
+                    continue
+                le = float((lp_ev - self.ratio * lm_ev).sum()) / pe
+                for g in self._group_vals:
+                    pge = float(prob_ge.get((ev, g), 0.0))
+                    if pge < 1e-8:
+                        continue
+                    lp_g = float(lp_ev.get(g, 0.0))
+                    lm_g = float(lm_ev.get(g, 0.0))
+                    adjust = le - (self.ratio * lp_g - lm_g) / pge
+                    mask = (self.tags[col] == ev) & (groups == g)
+                    rewards.loc[mask, cls] += adjust
+
+        return rewards
+
     def __repr__(self):
         return f"GeneralEqualizedOddsAll(eps={self.eps}, ratio={self.ratio})"
 
@@ -1072,6 +1144,15 @@ class CombinedParityGeneralAll(ClassificationMoment):
         if self._eo is not None:
             weights += self._eo.signed_weights(lambda_vec)
         return weights
+
+    def per_class_rewards(self, lambda_vec):
+        """Sum of the DP and EO per-sample, per-class Lagrangian rewards."""
+        rewards = pd.DataFrame(0.0, index=self.tags.index, columns=self._classes)
+        if self._dp is not None:
+            rewards += self._dp.per_class_rewards(lambda_vec)
+        if self._eo is not None:
+            rewards += self._eo.per_class_rewards(lambda_vec)
+        return rewards
 
     def __repr__(self):
         return (
