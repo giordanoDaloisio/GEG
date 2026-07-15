@@ -66,6 +66,10 @@ class Metrics:
                     FP += 1
                 else:
                     TN += 1
+        # n_pos = TP + FN is the positive-class support; when it is 0 the TPR is
+        # undefined for this group (returned here as 0 for backwards compatibility,
+        # but callers can use the support to skip such degenerate cases).
+        n_pos = TP + FN
         if TP + FN == 0:
             TPR = 0
         else:
@@ -74,7 +78,7 @@ class Metrics:
             FPR = 0
         else:
             FPR = FP / (FP + TN)
-        return FPR, TPR
+        return FPR, TPR, n_pos
 
     def __compute_tpr_fpr_groups(self, group_condition, positive_label=None):
         if positive_label is None:
@@ -88,9 +92,9 @@ class Metrics:
         y_true_priv = priv_group[self.true_label].values.ravel()
         y_pred_priv = priv_group[self.label_name].values.ravel()
 
-        fpr_unpriv, tpr_unpriv = self.__compute_tpr_fpr(y_true_unpriv, y_pred_unpriv, positive_label=positive_label)
-        fpr_priv, tpr_priv = self.__compute_tpr_fpr(y_true_priv, y_pred_priv, positive_label=positive_label)
-        return fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv
+        fpr_unpriv, tpr_unpriv, sup_unpriv = self.__compute_tpr_fpr(y_true_unpriv, y_pred_unpriv, positive_label=positive_label)
+        fpr_priv, tpr_priv, sup_priv = self.__compute_tpr_fpr(y_true_priv, y_pred_priv, positive_label=positive_label)
+        return fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv, sup_unpriv, sup_priv
 
     def group_ratio(self, group_condition):
         unpriv_group, unpriv_group_pos, priv_group, priv_group_pos = self.__get_groups(
@@ -144,23 +148,35 @@ class Metrics:
         return max(stat_pars, key=abs)
 
     def average_odds(self, group_condition: dict):
-        fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv = self.__compute_tpr_fpr_groups(
+        fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv, _, _ = self.__compute_tpr_fpr_groups(
             group_condition
         )
         return ((tpr_unpriv - tpr_priv) + (fpr_unpriv - fpr_priv)) / 2
-    
+
     def wc_average_odds(self, group_condition: dict):
         odds_diffs = []
         for label in self.data_pred[self.label_name].unique():
-            fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv = self.__compute_tpr_fpr_groups(
-                group_condition, positive_label=label
-            )
+            (
+                fpr_unpriv,
+                tpr_unpriv,
+                fpr_priv,
+                tpr_priv,
+                sup_unpriv,
+                sup_priv,
+            ) = self.__compute_tpr_fpr_groups(group_condition, positive_label=label)
+            # Skip labels with no positive support in either group: the TPR is
+            # undefined there and would otherwise produce a spurious worst-case
+            # value of +-1 that collapses downstream aggregations (e.g. harmonic mean).
+            if sup_unpriv == 0 or sup_priv == 0:
+                continue
             odds_diff = ((tpr_unpriv - tpr_priv) + (fpr_unpriv - fpr_priv)) / 2
             odds_diffs.append(odds_diff)
+        if not odds_diffs:
+            return 0
         return max(odds_diffs, key=abs)
 
     def equal_opportunity(self, group_condition: dict):
-        fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv = self.__compute_tpr_fpr_groups(
+        fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv, _, _ = self.__compute_tpr_fpr_groups(
             group_condition
         )
         return tpr_unpriv - tpr_priv
@@ -168,11 +184,22 @@ class Metrics:
     def wc_equal_opportunity(self, group_condition: dict):
         tpr_diffs = []
         for label in self.data_pred[self.label_name].unique():
-            fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv = self.__compute_tpr_fpr_groups(
-                group_condition, positive_label=label
-            )
+            (
+                fpr_unpriv,
+                tpr_unpriv,
+                fpr_priv,
+                tpr_priv,
+                sup_unpriv,
+                sup_priv,
+            ) = self.__compute_tpr_fpr_groups(group_condition, positive_label=label)
+            # Skip labels with no positive support in either group (TPR undefined),
+            # avoiding the degenerate +-1 worst-case artifact.
+            if sup_unpriv == 0 or sup_priv == 0:
+                continue
             tpr_diff = tpr_unpriv - tpr_priv
             tpr_diffs.append(tpr_diff)
+        if not tpr_diffs:
+            return 0
         return max(tpr_diffs, key=abs)
 
     def equal_accuracy(self, group_condition: dict):
@@ -184,13 +211,13 @@ class Metrics:
         return accuracy_priv - accuracy_unpriv
 
     def true_pos_diff(self, group_condition: str):
-        fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv = self.__compute_tpr_fpr_groups(
+        fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv, _, _ = self.__compute_tpr_fpr_groups(
             group_condition
         )
         return tpr_unpriv - tpr_priv
 
     def false_pos_diff(self, group_condition: str):
-        fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv = self.__compute_tpr_fpr_groups(
+        fpr_unpriv, tpr_unpriv, fpr_priv, tpr_priv, _, _ = self.__compute_tpr_fpr_groups(
             group_condition
         )
         return fpr_unpriv - fpr_priv
